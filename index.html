@@ -83,6 +83,11 @@
             display: none;
         }
 
+        #rarity {
+            font-size: 0.8em;
+            color: gray;
+        }
+
         .resp-sharing-button__link,
         .resp-sharing-button__icon {
             display: inline-block
@@ -227,17 +232,22 @@
         const HEIGHT = 631;
         const COLOR_STEPS = 8
 
-        function xmur3(str) {
-            let i = 0, h = 1779033703 ^ str.length;
-            for (; i < str.length; i++) {
-                h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
-                h = h << 13 | h >>> 19;
+        function cyrb128(str) {
+            console.log(str)
+            let h1 = 1779033703, h2 = 3144134277,
+                h3 = 1013904242, h4 = 2773480762;
+            for (let i = 0, k; i < str.length; i++) {
+                k = str.charCodeAt(i);
+                h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
+                h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
+                h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
+                h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
             }
-            return function () {
-                h = Math.imul(h ^ (h >>> 16), 2246822507);
-                h = Math.imul(h ^ (h >>> 13), 3266489909);
-                return (h ^= h >>> 16) >>> 0;
-            }
+            h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
+            h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
+            h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
+            h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+            return [(h1 ^ h2 ^ h3 ^ h4) >>> 0, (h2 ^ h1) >>> 0, (h3 ^ h1) >>> 0, (h4 ^ h1) >>> 0];
         }
 
         function sfc32(a, b, c, d) {
@@ -261,18 +271,10 @@
             return [...Array(10)].map(i => (~~(Math.random() * 36)).toString(36)).join('')
         }
 
-        async function sha256(message) {
-            const msgBuffer = new TextEncoder().encode(message);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        }
-
-        let tokenNumber = undefined;
-
+        let tokenNumber;
         let random;
 
-        async function initRandom() {
+        function initRandom() {
             tokenNumber = window.location.hash?.slice(1);
 
             // Generate new token number if none present
@@ -285,23 +287,11 @@
                     location.hash = '#' + tokenNumber;
                 }
             }
+
             // Hash seed string to consistent length and entropy
-            const seedString = await sha256(tokenNumber);
-            console.log("SEED STRING:", seedString);
-
-            const seeders = [xmur3(seedString.slice(0, 21)), xmur3(seedString.slice(21, 42)), xmur3(seedString.slice(42, 64))];
-
-            let prngs = [
-                sfc32(seeders[0](), seeders[0](), seeders[0](), seeders[0]()),
-                sfc32(seeders[1](), seeders[1](), seeders[1](), seeders[1]()),
-                sfc32(seeders[2](), seeders[2](), seeders[2](), seeders[2]())
-            ]
-            let picker = 0;
-            random = function () {
-                const value = prngs[picker]()
-                picker = (picker + 1) % 3;
-                return value;
-            }
+            const seedString = cyrb128(tokenNumber);
+            console.log("SEED:", seedString);
+            random = sfc32(...seedString);
         }
 
         function randomColor() {
@@ -386,8 +376,9 @@
             document.getElementById("url").value = rawURL;
         }
 
-        async function mintToken() {
-            await initRandom();
+        function mintToken() {
+            console.log("MINT")
+            initRandom();
             setLinks();
 
             const canvas = document.getElementById("canvas");
@@ -399,24 +390,26 @@
             context.fillStyle = `rgb(${randomColor()})`;
             context.fill();
 
-            function drawRandom(name, nVariants) {
-                name = name.replace("#", Math.floor(random() * nVariants));
+            function rareZeroRandom(max, rarity) {
+                return Math.floor((Math.floor(random() * ((max - 1) * rarity + 1)) + rarity - 1) / rarity)
+            }
+
+            let drawOutcome = {}
+
+            function drawRandom(label, name, nVariants, rarity = 10) {
+                const number = rareZeroRandom(nVariants, rarity);
+                drawOutcome[label] = [number, nVariants, rarity];
+                name = name.replace("#", number);
                 return draw(name, context)
             }
 
-            const outshirtNum = Math.floor(random() * 4);
-            const drawBackdrop = () => drawRandom("backdrops/backdrop#", 8)
-            const drawLandscape = () => drawRandom("landscapes/landscape#", 8)
-            const drawOutshirtBack = () => draw(`outshirt_backs/outshirt_back${outshirtNum}`, context);
-            const drawBody = () => draw("bodies/body0", context);
-            const drawHead = () => drawRandom("heads/head#", 8);
-            const drawEyes = () => drawRandom("eyes/eyes#", 8);
-            const drawMouth = () => drawRandom("mouths/mouth#", 8);
-            const drawHat = () => drawRandom("hats/hat#", 8);
-            const drawArms = () => drawRandom("arms/arms#", 8);
-            const drawInshirt = () => drawRandom("inshirts/inshirt#", 5);
-            const drawOutshirtFront = () => draw(`outshirt_fronts/outshirt_front${outshirtNum}`, context);
-            const drawNeckwear = () => drawRandom("neckwear/neckwear#", 5);
+            const drawBackdrop = () => drawRandom("Backdrop", "backdrops/backdrop#", 6)
+            const drawLandscape = () => drawRandom("Landscape", "landscapes/landscape#", 6)
+            const drawBody = () => drawRandom("Body", "bodies/body#", 6, 50);
+            const drawEyes = () => drawRandom("Eyes", "eyes/eyes#", 6);
+            const drawMouth = () => drawRandom("Mouth", "mouths/mouth#", 6);
+            const drawHat = () => drawRandom("Hat", "hats/hat#", 6, 20);
+
             const renderImage = () => {
                 const data = canvas.toDataURL("image/png");
                 const image = document.getElementById("token");
@@ -427,20 +420,28 @@
                 download.download = `fungible_token_${tokenNumber}.png`;
             }
 
+            const writeRarity = () => {
+                function makeDrawOutcomePart(label) {
+                    const outcome = drawOutcome[label];
+                    const poss = outcome[1] * outcome[2] + 1;
+                    const chance = outcome[0] > 0 ? outcome[2] / poss : 1 / poss;
+                    return `${label} #${outcome[0] + 1} (${(chance * 100).toFixed(2)}%)${outcome[0] === 0 ? ' RARE!' : ''}`
+                }
+
+                console.log(drawOutcome);
+                document.getElementById('rarity').innerText =
+                    // ['Backdrop', 'Landscape', 'Body', 'Eyes', 'Mouth', 'Hat'].map(makeDrawOutcomePart).join('\n')
+                    ['Backdrop'].map(makeDrawOutcomePart).join('\n');
+            }
+
             drawBackdrop()
-                .then(drawLandscape)
-                .then(drawOutshirtBack)
-                .then(drawBody)
-                .then(drawHead)
-                .then(drawEyes)
-                .then(drawMouth)
-                .then(drawHat)
-                .then(drawArms)
-                .then(drawInshirt)
-                .then(drawOutshirtFront)
-                .then(drawNeckwear)
-                // .then(drawObject)
-                .then(renderImage);
+                // .then(drawLandscape)
+                // .then(drawBody)
+                // .then(drawEyes)
+                // .then(drawMouth)
+                // .then(drawHat)
+                .then(renderImage)
+                .then(writeRarity);
         }
 
         function copyLink() {
@@ -469,7 +470,7 @@
 <body onload="mintToken()">
 <h1 style="margin-bottom: 0;">"Pumpkins"</h1>
 <p style="margin-top: 0;" id="token-number"></p>
-<img id="token" src="/art/meta/minting.png"/>
+<img id="token"/>
 <div id="share">
     <!-- Sharingbutton Facebook -->
     <a id="share-fb" class="resp-sharing-button__link" href="#"
@@ -543,6 +544,7 @@
         <div class="button">Download</div>
     </a>
 </div>
+<p id="rarity"></p>
 <p>This has been a Nonfungible Moement.</p>
 <hr/>
 <div style="color: gray; font-size: 0.8em">
